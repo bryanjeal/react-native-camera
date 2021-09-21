@@ -52,3 +52,6 @@ examples/mlkit/ios/mlkit/GoogleService-Info.plist
 
 !debug.keystore
 /ios/Pods/
+
+# visual studio
+.vs/

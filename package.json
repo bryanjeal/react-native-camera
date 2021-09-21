@@ -36,6 +36,7 @@
     "prettier": "^2.1.1",
     "react": "16.13.1",
     "react-native": "0.63.2",
+    "react-native-windows": "~0.63.0", 
     "semantic-release": "^17.1.1"
   },
   "homepage": "https://github.com/react-native-community/react-native-camera",
