@@ -61,6 +61,10 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
   const JSValueObject &propertyMap = JSValue::ReadObjectFrom(propertyMapReader);
 
   for (auto const &pair : propertyMap) {
+    if (m_IsTakingPicture) {
+        return;
+    }
+
     auto const &propertyName = pair.first;
     auto const &propertyValue = pair.second;
     if (!propertyValue.IsNull()) {
@@ -111,6 +115,7 @@ IAsyncAction ReactCameraView::UpdateFilePropertiesAsync(StorageFile storageFile,
 IAsyncAction ReactCameraView::TakePictureAsync(
     JSValueObject const &options,
     ReactPromise<JSValueObject> const &result) noexcept {
+  m_IsTakingPicture = true;
   auto capturedPromise = result;
   auto capturedOptions = options.Copy();
 
@@ -295,6 +300,7 @@ IAsyncAction ReactCameraView::TakePictureAsync(
   co_await resume_background();
 
   StartBarcodeScanner();
+  m_IsTakingPicture = false;
 }
 
 IAsyncAction ReactCameraView::RecordAsync(
