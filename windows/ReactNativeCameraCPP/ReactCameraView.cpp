@@ -115,7 +115,6 @@ IAsyncAction ReactCameraView::UpdateFilePropertiesAsync(StorageFile storageFile,
 IAsyncAction ReactCameraView::TakePictureAsync(
     JSValueObject const &options,
     ReactPromise<JSValueObject> const &result) noexcept {
-  m_IsTakingPicture = true;
   auto capturedPromise = result;
   auto capturedOptions = options.Copy();
 
@@ -123,6 +122,12 @@ IAsyncAction ReactCameraView::TakePictureAsync(
     capturedPromise.Reject(L"Media device is not initialized.");
     co_return;
   }
+
+  if (m_IsTakingPicture) {
+      capturedPromise.Reject(L"Camera is in picture taking process.");
+      co_return;
+  }
+  m_IsTakingPicture = true;
 
   StopBarcodeScanner();
 
