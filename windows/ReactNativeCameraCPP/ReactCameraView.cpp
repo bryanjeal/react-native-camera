@@ -61,7 +61,7 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
   const JSValueObject &propertyMap = JSValue::ReadObjectFrom(propertyMapReader);
 
   for (auto const &pair : propertyMap) {
-    if (m_IsTakingPicture) {
+    if (m_IsBusy) {
         return;
     }
 
@@ -123,11 +123,11 @@ IAsyncAction ReactCameraView::TakePictureAsync(
     co_return;
   }
 
-  if (m_IsTakingPicture) {
+  if (m_IsBusy) {
       capturedPromise.Reject(L"Camera is in picture taking process.");
       co_return;
   }
-  m_IsTakingPicture = true;
+  m_IsBusy = true;
 
   StopBarcodeScanner();
 
@@ -305,7 +305,7 @@ IAsyncAction ReactCameraView::TakePictureAsync(
   co_await resume_background();
 
   StartBarcodeScanner();
-  m_IsTakingPicture = false;
+  m_IsBusy = false;
 }
 
 IAsyncAction ReactCameraView::RecordAsync(
@@ -527,6 +527,7 @@ fire_and_forget ReactCameraView::UpdateDeviceId(std::string cameraId) {
 
 // Switch between front and back cameras, need to clean up and reinitialize the mediaCapture object
 fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
+    m_IsBusy = true;
   winrt::Windows::Devices::Enumeration::Panel newPanelType =
       static_cast<winrt::Windows::Devices::Enumeration::Panel>(type);
   if (m_panelType == newPanelType && m_isInitialized) {
@@ -538,6 +539,7 @@ fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
     co_await CleanupMediaCaptureAsync();
   }
   co_await InitializeAsync();
+  m_IsBusy = false;
 }
 
 // Request monitor to not turn off if keepAwake is true
