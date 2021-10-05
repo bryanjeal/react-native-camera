@@ -527,7 +527,7 @@ fire_and_forget ReactCameraView::UpdateDeviceId(std::string cameraId) {
 
 // Switch between front and back cameras, need to clean up and reinitialize the mediaCapture object
 fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
-    m_IsBusy = true;
+  m_IsBusy = true;
   winrt::Windows::Devices::Enumeration::Panel newPanelType =
       static_cast<winrt::Windows::Devices::Enumeration::Panel>(type);
   if (m_panelType == newPanelType && m_isInitialized) {
@@ -737,6 +737,7 @@ IAsyncAction ReactCameraView::InitializeAsync() {
   } catch (winrt::hresult_error const &) {
     m_isInitialized = false;
   }
+  m_IsBusy = false;
 }
 
 IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync() {
