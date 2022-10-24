@@ -1,5 +1,8 @@
 #include "pch.h"
 
+#include <chrono>
+#include <thread>
+
 #include "NativeModules.h"
 
 #include "ReactCameraConstants.h"
@@ -60,10 +63,16 @@ void ReactCameraView::Initialize() {
 void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) noexcept {
   const JSValueObject &propertyMap = JSValue::ReadObjectFrom(propertyMapReader);
 
+  if (m_isBusy.load() || m_isRecording.load()) {
+    return;
+  }
+
+  m_isBusy.store(true);
   for (auto const &pair : propertyMap) {
-    if (m_IsBusy) {
+    if (m_isRecording.load()) {
+        m_isBusy.store(false);
         return;
-    }
+      }
 
     auto const &propertyName = pair.first;
     auto const &propertyValue = pair.second;
@@ -95,6 +104,7 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
       }
     }
   }
+  m_isBusy.store(false);
 }
 
 IAsyncAction ReactCameraView::UpdateFilePropertiesAsync(StorageFile storageFile, JSValueObject const &options) {
@@ -118,16 +128,22 @@ IAsyncAction ReactCameraView::TakePictureAsync(
   auto capturedPromise = result;
   auto capturedOptions = options.Copy();
 
-  if (!m_isInitialized) {
+  if (!m_isInitialized.load()) {
     capturedPromise.Reject(L"Media device is not initialized.");
     co_return;
   }
 
-  if (m_IsBusy) {
-      capturedPromise.Reject(L"Camera is in picture taking process.");
-      co_return;
+  if (m_isRecording.load()) {
+    capturedPromise.Reject(L"Media device is already recording.");
+    co_return;
   }
-  m_IsBusy = true;
+
+  if (m_isBusy.load()) {
+    capturedPromise.Reject(L"System is busy doing another action.");
+    co_return;
+  }
+
+  m_isRecording.store(true);
 
   StopBarcodeScanner();
 
@@ -305,7 +321,7 @@ IAsyncAction ReactCameraView::TakePictureAsync(
   co_await resume_background();
 
   StartBarcodeScanner();
-  m_IsBusy = false;
+  m_isRecording.store(false);
 }
 
 IAsyncAction ReactCameraView::RecordAsync(
@@ -314,10 +330,22 @@ IAsyncAction ReactCameraView::RecordAsync(
   auto capturedPromise = result;
   auto capturedOptions = options.Copy();
 
-  if (!m_isInitialized) {
+  if (!m_isInitialized.load()) {
     capturedPromise.Reject(L"Media device is not initialized.");
     co_return;
   }
+
+  if (m_isRecording.load()) {
+    capturedPromise.Reject(L"Media device is already recording.");
+    co_return;
+  }
+
+  if (m_isBusy.load()) {
+    capturedPromise.Reject(L"System is busy doing another action.");
+    co_return;
+  }
+
+  m_isRecording.store(true);
 
   StopBarcodeScanner();
 
@@ -387,7 +415,6 @@ IAsyncAction ReactCameraView::RecordAsync(
     winrt::JSValueObject resultObject;
     resultObject["codec"] = videoCodec;
 
-    m_isRecording = true;
     if (target == ReactCameraConstants::CameraCaptureTargetMemory) {
       auto randomStream = winrt::InMemoryRandomAccessStream();
       m_mediaRecording = co_await mediaCapture.PrepareLowLagRecordToStreamAsync(encodingProfile, randomStream);
@@ -416,7 +443,6 @@ IAsyncAction ReactCameraView::RecordAsync(
         capturedPromise.Reject(L"Unable to capture to disk, check app capabilities.");
       }
     }
-    m_isRecording = false;
 
   } else {
     capturedPromise.Reject("No media capture device found");
@@ -425,10 +451,12 @@ IAsyncAction ReactCameraView::RecordAsync(
   co_await resume_background();
 
   StartBarcodeScanner();
+
+  m_isRecording.store(false);
 }
 
 IAsyncAction ReactCameraView::StopRecordAsync() noexcept {
-  if (!m_isInitialized) {
+  if (!m_isInitialized.load()) {
     co_return;
   }
 
@@ -439,46 +467,56 @@ IAsyncAction ReactCameraView::IsRecordingAsync(
     winrt::Microsoft::ReactNative::ReactPromise<bool> const &result) noexcept {
   auto capturedPromise = result;
 
-  if (!m_isInitialized) {
+  if (!m_isInitialized.load()) {
     capturedPromise.Reject(L"Media device is not initialized.");
     co_return;
   }
 
-  capturedPromise.Resolve(m_isRecording);
+  capturedPromise.Resolve(m_isRecording.load());
 }
 
 IAsyncAction ReactCameraView::PausePreviewAsync() noexcept {
-  if (!m_isInitialized) {
+  if (!m_isInitialized.load()) {
     co_return;
   }
 
   auto dispatcher = Dispatcher();
   co_await resume_foreground(dispatcher);
 
+  m_isBusy.store(true);
   if (auto mediaCapture = m_childElement.Source()) {
     if (m_isPreview) {
-      co_await mediaCapture.StopPreviewAsync();
+      try {
+        co_await mediaCapture.StopPreviewAsync();
+      } catch (...) {
+      }
       m_isPreview = false;
     }
   }
+  m_isBusy.store(false);
 
   co_await resume_background();
 }
 
 IAsyncAction ReactCameraView::ResumePreviewAsync() noexcept {
-  if (!m_isInitialized) {
+  if (!m_isInitialized.load()) {
     co_return;
   }
 
   auto dispatcher = Dispatcher();
   co_await resume_foreground(dispatcher);
 
+  m_isBusy.store(true);
   if (auto mediaCapture = m_childElement.Source()) {
     if (!m_isPreview) {
-      co_await mediaCapture.StartPreviewAsync();
-      m_isPreview = true;
+      try {
+        co_await mediaCapture.StartPreviewAsync();
+        m_isPreview = true;
+      } catch (...) {
+      }
     }
   }
+  m_isBusy.store(false);
 
   co_await resume_background();
 }
@@ -504,7 +542,9 @@ IAsyncAction ReactCameraView::WaitAndStopRecording() {
   auto dispatcher = Dispatcher();
   co_await resume_foreground(dispatcher);
 
-  co_await m_mediaRecording.StopAsync();
+  if (m_mediaRecording) {
+    co_await m_mediaRecording.StopAsync();
+  }
 
   // Reset stream to default
   co_await UpdateMediaStreamPropertiesAsync();
@@ -514,12 +554,12 @@ IAsyncAction ReactCameraView::WaitAndStopRecording() {
 
 // Select a particular camera, need to clean up and reinitialize the mediaCapture object
 fire_and_forget ReactCameraView::UpdateDeviceId(std::string cameraId) {
-  if (m_cameraId == cameraId && m_isInitialized) {
+  if (m_cameraId == cameraId && m_isInitialized.load()) {
     return;
   }
 
   m_cameraId = cameraId;
-  if (m_isInitialized) {
+  if (m_isInitialized.load()) {
     co_await CleanupMediaCaptureAsync();
   }
   co_await InitializeAsync();
@@ -527,19 +567,17 @@ fire_and_forget ReactCameraView::UpdateDeviceId(std::string cameraId) {
 
 // Switch between front and back cameras, need to clean up and reinitialize the mediaCapture object
 fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
-  m_IsBusy = true;
   winrt::Windows::Devices::Enumeration::Panel newPanelType =
       static_cast<winrt::Windows::Devices::Enumeration::Panel>(type);
-  if (m_panelType == newPanelType && m_isInitialized) {
+  if (m_panelType == newPanelType && m_isInitialized.load()) {
     return;
   }
 
   m_panelType = newPanelType;
-  if (m_isInitialized) {
+  if (m_isInitialized.load()) {
     co_await CleanupMediaCaptureAsync();
   }
   co_await InitializeAsync();
-  m_IsBusy = false;
 }
 
 // Request monitor to not turn off if keepAwake is true
@@ -673,10 +711,11 @@ void ReactCameraView::UpdateBarcodeReadIntervalMS(int barcodeReadIntervalMS) {
   m_barcodeReadIntervalMS = std::max<int>(ReactCameraConstants::BarcodeReadIntervalMinMS, barcodeReadIntervalMS);
 }
 
-// Intialization takes care few things below:
+// Initialization takes care few things below:
 // 1. Register rotation helper to update preview if rotation changes.
-// 2. Takes care connected standby scenarios to cleanup and reintialize when suspend/resume
-IAsyncAction ReactCameraView::InitializeAsync() {
+// 2. Takes care connected standby scenarios to cleanup and re-initialize when suspend/resume
+IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
+  m_isBusy.store(true);
   try {
     auto device = co_await FindCameraDeviceAsync();
     if (device != nullptr) {
@@ -684,12 +723,30 @@ IAsyncAction ReactCameraView::InitializeAsync() {
       settings.VideoDeviceId(device.Id());
 
       auto mediaCapture = winrt::Windows::Media::Capture::MediaCapture();
-      co_await mediaCapture.InitializeAsync(settings);
 
-      m_availableVideoEncodingProperties =
-          mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(winrt::MediaStreamType::VideoPreview);
+      bool isInitErr = false;
+      try {
+        co_await mediaCapture.InitializeAsync(settings);
 
-      m_childElement.Source(mediaCapture);
+        m_availableVideoEncodingProperties = mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(
+            winrt::MediaStreamType::VideoPreview);
+
+        m_childElement.Source(mediaCapture);
+      } catch (...) {
+        // cannot have a `co_await` in a `catch` block
+        isInitErr = true;
+      }
+
+      const bool keepTryingToInit = initAttempts < 25;
+      if (isInitErr && keepTryingToInit) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        co_await InitializeAsync(++initAttempts);
+        m_isBusy.store(false);
+        co_return;
+      } else if (!keepTryingToInit) {
+        m_isBusy.store(false);
+        co_return;
+      }
 
       co_await UpdateMediaStreamPropertiesAsync();
 
@@ -700,8 +757,8 @@ IAsyncAction ReactCameraView::InitializeAsync() {
       UpdateMirrorVideo(m_mirrorVideo);
       UpdateBarcodeScannerEnabled(m_barcodeScannerEnabled);
 
-      co_await mediaCapture.StartPreviewAsync();
       m_isPreview = true;
+      co_await mediaCapture.StartPreviewAsync();
 
       m_rotationHelper = CameraRotationHelper(device.EnclosureLocation());
       m_rotationEventToken =
@@ -726,18 +783,17 @@ IAsyncAction ReactCameraView::InitializeAsync() {
             }
           });
 
-      m_isInitialized = true;
+      m_isInitialized.store(true);
 
       auto control = this->get_strong().try_as<winrt::FrameworkElement>();
       if (m_reactContext && control) {
         m_reactContext.DispatchEvent(control, CameraReadyEvent, nullptr);
       }
-
     }
   } catch (winrt::hresult_error const &) {
-    m_isInitialized = false;
+    m_isInitialized.store(false);
   }
-  m_IsBusy = false;
+  m_isBusy.store(false);
 }
 
 IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync() {
@@ -804,13 +860,17 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality)
 }
 
 IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
-  if (m_isInitialized) {
+  if (m_isInitialized.load()) {
+    m_isBusy.store(true);
     SetEvent(m_signal.get()); // In case recording is still going on
     if (auto mediaCapture = m_childElement.Source()) {
       StopBarcodeScanner();
 
       if (m_isPreview) {
-        co_await mediaCapture.StopPreviewAsync();
+        try {
+          co_await mediaCapture.StopPreviewAsync();
+        } catch (...) {
+        }
         m_isPreview = false;
       }
 
@@ -820,7 +880,8 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
       }
       m_childElement.Source(nullptr);
     }
-    m_isInitialized = false;
+    m_isInitialized.store(false);
+    m_isBusy.store(false);
   }
 }
 
@@ -893,7 +954,7 @@ void ReactCameraView::StopBarcodeScanner() {
 }
 
 winrt::Windows::Foundation::IAsyncAction ReactCameraView::ScanForBarcodeAsync() {
-  if (!m_isInitialized || !m_barcodeScannerEnabled || !m_isPreview) {
+  if (!m_isInitialized.load() || !m_barcodeScannerEnabled || !m_isPreview) {
     co_return;
   }
 
@@ -936,8 +997,8 @@ winrt::Windows::Foundation::IAsyncAction ReactCameraView::ScanForBarcodeAsync() 
       }
     }
   } catch (...) {
-      // We can't do anything since this is running in it's own thread,
-      // there's no way to report the exception, and we want the code to cleanup here
+    // We can't do anything since this is running in it's own thread,
+    // there's no way to report the exception, and we want the code to cleanup here
   }
 
   co_await resume_background();
@@ -972,7 +1033,7 @@ void ReactCameraView::OnApplicationResuming() {
 
 // update preview considering current orientation
 IAsyncAction ReactCameraView::UpdatePreviewOrientationAsync() {
-  if (m_isInitialized) {
+  if (m_isInitialized.load()) {
     if (auto mediaCapture = m_childElement.Source()) {
       const GUID RotationKey = {0xC380465D, 0x2271, 0x428C, {0x9B, 0x83, 0xEC, 0xEA, 0x3B, 0x4A, 0x85, 0xC1}};
       auto props = mediaCapture.VideoDeviceController().GetMediaStreamProperties(MediaStreamType::VideoPreview);

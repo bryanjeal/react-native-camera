@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "JSValue.h"
 #include "NativeModules.h"
 
@@ -45,7 +47,7 @@ struct ReactCameraView : winrt::Windows::UI::Xaml::Controls::GridT<ReactCameraVi
   fire_and_forget UpdateDeviceId(std::string cameraId);
   fire_and_forget UpdateDeviceType(int type);
 
-  winrt::Windows::Foundation::IAsyncAction InitializeAsync();
+  winrt::Windows::Foundation::IAsyncAction InitializeAsync(size_t initAttempts = 0);
 
   winrt::Windows::Foundation::IAsyncAction UpdateMediaStreamPropertiesAsync();
   winrt::Windows::Foundation::IAsyncAction UpdateMediaStreamPropertiesAsync(int videoQuality);
@@ -111,10 +113,10 @@ struct ReactCameraView : winrt::Windows::UI::Xaml::Controls::GridT<ReactCameraVi
   winrt::Windows::UI::Xaml::Application::Resuming_revoker m_applicationResumingEventToken;
   winrt::Windows::UI::Xaml::FrameworkElement::Unloaded_revoker m_unloadedEventToken;
 
-  bool m_IsBusy{false};
-  bool m_isInitialized{false};
+  std::atomic<bool> m_isInitialized{false};
+  std::atomic<bool> m_isRecording{false};
+  std::atomic<bool> m_isBusy{false};
   bool m_keepAwake{false};
-  bool m_isRecording{false};
   int m_flashMode{ReactCameraConstants::CameraFlashModeOff};
   int m_whiteBalance{ReactCameraConstants::CameraWhiteBalanceAuto};
   int m_focusMode{ReactCameraConstants::CameraAutoFocusOn};
