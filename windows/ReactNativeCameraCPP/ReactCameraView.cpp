@@ -580,17 +580,13 @@ fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
   co_await InitializeAsync();
 }
 
-void TryUpdateMediaCaptureSourceImpl(
-    winrt::Windows::Foundation::Collections::IVectorView<
-        winrt::Windows::Media::MediaProperties::IMediaEncodingProperties> &videoEncodingProperties,
-    winrt::Windows::UI::Xaml::Controls::CaptureElement &captureElement,
-    const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
-
-}
-
 bool ReactCameraView::TryUpdateMediaCaptureSource(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
   __try {
     [&]() {
+      if (!mediaCapture || !m_childElement) {
+        return false;
+      }
+
       m_availableVideoEncodingProperties =
           mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(winrt::MediaStreamType::VideoPreview);
 
@@ -737,6 +733,10 @@ void ReactCameraView::UpdateBarcodeReadIntervalMS(int barcodeReadIntervalMS) {
 // 1. Register rotation helper to update preview if rotation changes.
 // 2. Takes care connected standby scenarios to cleanup and re-initialize when suspend/resume
 IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
+  if (m_childElement == nullptr) {
+    co_return;
+  }
+
   m_isBusy.store(true);
   try {
     auto device = co_await FindCameraDeviceAsync();
@@ -769,10 +769,9 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
       UpdateMirrorVideo(m_mirrorVideo);
       UpdateBarcodeScannerEnabled(m_barcodeScannerEnabled);
 
-      m_isPreview = true;
-      auto mediaCapture = m_childElement.Source();
-      if (mediaCapture) {
-        co_await mediaCapture.StartPreviewAsync();
+      if (m_mediaCapture && m_childElement) {
+        co_await m_mediaCapture.StartPreviewAsync();
+        m_isPreview = true;
       }
 
       m_rotationHelper = CameraRotationHelper(device.EnclosureLocation());
@@ -875,6 +874,10 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality)
 }
 
 IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
+  if (m_childElement) {
+    co_return;
+  }
+
   if (m_isInitialized.load()) {
     m_isBusy.store(true);
     SetEvent(m_signal.get()); // In case recording is still going on
@@ -893,7 +896,9 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
         m_rotationHelper.OrientationChanged(m_rotationEventToken);
         m_rotationHelper = nullptr;
       }
-      m_childElement.Source(nullptr);
+      if (m_childElement) {
+        m_childElement.Source(nullptr);
+      }
     }
     m_isInitialized.store(false);
     m_isBusy.store(false);
