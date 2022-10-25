@@ -723,17 +723,19 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
       settings.VideoDeviceId(device.Id());
 
       auto mediaCapture = winrt::Windows::Media::Capture::MediaCapture();
+      co_await mediaCapture.InitializeAsync(settings);
 
       bool isInitErr = false;
-      try {
-        co_await mediaCapture.InitializeAsync(settings);
-
+      __try {
         m_availableVideoEncodingProperties = mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(
             winrt::MediaStreamType::VideoPreview);
 
         m_childElement.Source(mediaCapture);
-      } catch (...) {
-        // cannot have a `co_await` in a `catch` block
+      } __except (
+          GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
+            ? EXCEPTION_EXECUTE_HANDLER
+            : EXCEPTION_CONTINUE_SEARCH) {
+
         isInitErr = true;
       }
 
