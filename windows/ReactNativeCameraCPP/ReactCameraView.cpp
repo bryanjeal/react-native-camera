@@ -585,15 +585,17 @@ void TryUpdateMediaCaptureSourceImpl(
         winrt::Windows::Media::MediaProperties::IMediaEncodingProperties> &videoEncodingProperties,
     winrt::Windows::UI::Xaml::Controls::CaptureElement &captureElement,
     const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
-  videoEncodingProperties =
-      mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(winrt::MediaStreamType::VideoPreview);
 
-  captureElement.Source(mediaCapture);
 }
 
 bool ReactCameraView::TryUpdateMediaCaptureSource(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
   __try {
-    TryUpdateMediaCaptureSourceImpl(m_availableVideoEncodingProperties, m_childElement, mediaCapture);
+    [&]() {
+      m_availableVideoEncodingProperties =
+          mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(winrt::MediaStreamType::VideoPreview);
+
+      m_childElement.Source(mediaCapture);
+    }();
     return true;
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
@@ -869,6 +871,13 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality)
   co_return;
 }
 
+void MediaCaptureStopPreview(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
+  __try {
+    [&]() { mediaCapture.StopPreviewAsync().get(); }();
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+}
+
 IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
   if (m_isInitialized.load()) {
     m_isBusy.store(true);
@@ -878,7 +887,7 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
 
       if (m_isPreview) {
         try {
-          co_await mediaCapture.StopPreviewAsync();
+          MediaCaptureStopPreview(mediaCapture);
         } catch (...) {
         }
         m_isPreview = false;
@@ -893,6 +902,8 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
     m_isInitialized.store(false);
     m_isBusy.store(false);
   }
+
+  co_return;
 }
 
 IAsyncOperation<winrt::DeviceInformation> ReactCameraView::FindCameraDeviceAsync() {
