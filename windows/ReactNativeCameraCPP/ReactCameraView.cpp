@@ -580,6 +580,26 @@ fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
   co_await InitializeAsync();
 }
 
+void TryUpdateMediaCaptureSourceImpl(
+    winrt::Windows::Foundation::Collections::IVectorView<
+        winrt::Windows::Media::MediaProperties::IMediaEncodingProperties> &videoEncodingProperties,
+    winrt::Windows::UI::Xaml::Controls::CaptureElement &captureElement,
+    const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
+  videoEncodingProperties =
+      mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(winrt::MediaStreamType::VideoPreview);
+
+  captureElement.Source(mediaCapture);
+}
+
+bool ReactCameraView::TryUpdateMediaCaptureSource(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
+  __try {
+    TryUpdateMediaCaptureSourceImpl(m_availableVideoEncodingProperties, m_childElement, mediaCapture);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
 // Request monitor to not turn off if keepAwake is true
 void ReactCameraView::UpdateKeepAwake(bool keepAwake) {
   if (m_keepAwake != keepAwake) {
@@ -725,22 +745,10 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
       auto mediaCapture = winrt::Windows::Media::Capture::MediaCapture();
       co_await mediaCapture.InitializeAsync(settings);
 
-      bool isInitErr = false;
-      __try {
-        m_availableVideoEncodingProperties = mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(
-            winrt::MediaStreamType::VideoPreview);
-
-        m_childElement.Source(mediaCapture);
-      } __except (
-          GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
-            ? EXCEPTION_EXECUTE_HANDLER
-            : EXCEPTION_CONTINUE_SEARCH) {
-
-        isInitErr = true;
-      }
+      const bool updateSuccessful = TryUpdateMediaCaptureSource(mediaCapture);
 
       const bool keepTryingToInit = initAttempts < 25;
-      if (isInitErr && keepTryingToInit) {
+      if (!updateSuccessful && keepTryingToInit) {
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
         co_await InitializeAsync(++initAttempts);
         m_isBusy.store(false);

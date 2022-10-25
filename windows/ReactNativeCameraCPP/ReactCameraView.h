@@ -33,6 +33,7 @@ struct ReactCameraView : winrt::Windows::UI::Xaml::Controls::GridT<ReactCameraVi
   static winrt::com_ptr<ReactCameraView> Create();
 
  private:
+  bool TryUpdateMediaCaptureSource(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture);
   void UpdateKeepAwake(bool keepAwake);
   void UpdateFlashMode(int flashMode);
   void UpdateAutoFocus(int focusMode);
