@@ -582,7 +582,7 @@ fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
 
 bool ReactCameraView::TryUpdateMediaCaptureSource(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
   __try {
-    [&]() {
+    return [&]() -> bool {
       if (!mediaCapture || !m_childElement) {
         return false;
       }
@@ -591,8 +591,8 @@ bool ReactCameraView::TryUpdateMediaCaptureSource(const winrt::Windows::Media::C
           mediaCapture.VideoDeviceController().GetAvailableMediaStreamProperties(winrt::MediaStreamType::VideoPreview);
 
       m_childElement.Source(mediaCapture);
+      return true;
     }();
-    return true;
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
   }
