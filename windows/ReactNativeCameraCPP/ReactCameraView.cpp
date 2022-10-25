@@ -476,7 +476,7 @@ IAsyncAction ReactCameraView::IsRecordingAsync(
 }
 
 IAsyncAction ReactCameraView::PausePreviewAsync() noexcept {
-  if (!m_isInitialized.load()) {
+  if (!m_isInitialized.load() || m_isBusy.load()) {
     co_return;
   }
 
@@ -499,7 +499,7 @@ IAsyncAction ReactCameraView::PausePreviewAsync() noexcept {
 }
 
 IAsyncAction ReactCameraView::ResumePreviewAsync() noexcept {
-  if (!m_isInitialized.load()) {
+  if (!m_isInitialized.load() || m_isBusy.load()) {
     co_return;
   }
 
@@ -744,10 +744,10 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
       auto settings = winrt::Windows::Media::Capture::MediaCaptureInitializationSettings();
       settings.VideoDeviceId(device.Id());
 
-      auto mediaCapture = winrt::Windows::Media::Capture::MediaCapture();
-      co_await mediaCapture.InitializeAsync(settings);
+      m_mediaCapture = winrt::Windows::Media::Capture::MediaCapture();
+      co_await m_mediaCapture.InitializeAsync(settings);
 
-      const bool updateSuccessful = TryUpdateMediaCaptureSource(mediaCapture);
+      const bool updateSuccessful = TryUpdateMediaCaptureSource(m_mediaCapture);
 
       const bool keepTryingToInit = initAttempts < 25;
       if (!updateSuccessful && keepTryingToInit) {
@@ -770,7 +770,10 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
       UpdateBarcodeScannerEnabled(m_barcodeScannerEnabled);
 
       m_isPreview = true;
-      co_await mediaCapture.StartPreviewAsync();
+      auto mediaCapture = m_childElement.Source();
+      if (mediaCapture) {
+        co_await mediaCapture.StartPreviewAsync();
+      }
 
       m_rotationHelper = CameraRotationHelper(device.EnclosureLocation());
       m_rotationEventToken =
@@ -871,13 +874,6 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality)
   co_return;
 }
 
-void MediaCaptureStopPreview(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
-  __try {
-    [&]() { mediaCapture.StopPreviewAsync().get(); }();
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-  }
-}
-
 IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
   if (m_isInitialized.load()) {
     m_isBusy.store(true);
@@ -886,11 +882,11 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
       StopBarcodeScanner();
 
       if (m_isPreview) {
+        m_isPreview = false;
         try {
-          MediaCaptureStopPreview(mediaCapture);
+          co_await mediaCapture.StopPreviewAsync();
         } catch (...) {
         }
-        m_isPreview = false;
       }
 
       if (m_rotationHelper != nullptr) {
@@ -902,8 +898,6 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
     m_isInitialized.store(false);
     m_isBusy.store(false);
   }
-
-  co_return;
 }
 
 IAsyncOperation<winrt::DeviceInformation> ReactCameraView::FindCameraDeviceAsync() {

@@ -114,6 +114,8 @@ struct ReactCameraView : winrt::Windows::UI::Xaml::Controls::GridT<ReactCameraVi
   winrt::Windows::UI::Xaml::Application::Resuming_revoker m_applicationResumingEventToken;
   winrt::Windows::UI::Xaml::FrameworkElement::Unloaded_revoker m_unloadedEventToken;
 
+  winrt::Windows::Media::Capture::MediaCapture m_mediaCapture{};
+
   std::atomic<bool> m_isInitialized{false};
   std::atomic<bool> m_isRecording{false};
   std::atomic<bool> m_isBusy{false};
