@@ -45,10 +45,12 @@ struct ReactCameraView : winrt::Windows::UI::Xaml::Controls::GridT<ReactCameraVi
   void UpdateBarcodeTypes(winrt::Microsoft::ReactNative::JSValueArray const &barcodeTypes);
   void UpdateBarcodeReadIntervalMS(int barcodeReadIntervalMS);
 
-  fire_and_forget UpdateDeviceId(std::string cameraId);
-  fire_and_forget UpdateDeviceType(int type);
+  bool UpdateDeviceId(std::string cameraId);
+  bool UpdateDeviceType(int type);
+  fire_and_forget ReInitialize();
 
-  winrt::Windows::Foundation::IAsyncAction InitializeAsync(size_t initAttempts = 0);
+winrt::Windows::Foundation::IAsyncAction
+InitializeAsync(size_t initAttempts = 0);
 
   winrt::Windows::Foundation::IAsyncAction UpdateMediaStreamPropertiesAsync();
   winrt::Windows::Foundation::IAsyncAction UpdateMediaStreamPropertiesAsync(int videoQuality);
@@ -116,6 +118,7 @@ struct ReactCameraView : winrt::Windows::UI::Xaml::Controls::GridT<ReactCameraVi
 
   winrt::Windows::Media::Capture::MediaCapture m_mediaCapture{};
 
+  static std::atomic<bool> m_isInitializing;
   std::atomic<bool> m_isInitialized{false};
   std::atomic<bool> m_isRecording{false};
   std::atomic<bool> m_isBusy{false};

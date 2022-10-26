@@ -33,6 +33,8 @@ using namespace std::chrono;
 
 namespace winrt::ReactNativeCameraCPP {
 
+std::atomic<bool> ReactCameraView::m_isInitializing{false};
+
 /*static*/ winrt::com_ptr<ReactCameraView> ReactCameraView::Create() {
   auto view = winrt::make_self<ReactCameraView>();
   view->Initialize();
@@ -68,11 +70,23 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
   }
 
   m_isBusy.store(true);
+  // both `UpdateDeviceType` and `UpdateDeviceId` cause re-initialization
+  // let's only do one initialization
+  bool needToInit{false};
+  for (auto const &pair : propertyMap) {
+    auto const &propertyName = pair.first;
+    if (propertyName == "type") {
+      needToInit = true;
+    } else if (propertyName == "cameraId") {
+      needToInit = true;
+    }
+  }
+
   for (auto const &pair : propertyMap) {
     if (m_isRecording.load()) {
-        m_isBusy.store(false);
-        return;
-      }
+      m_isBusy.store(false);
+      return;
+    }
 
     auto const &propertyName = pair.first;
     auto const &propertyValue = pair.second;
@@ -84,9 +98,13 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
       } else if (propertyName == "whiteBalance") {
         UpdateWhiteBalance(propertyValue.AsInt32());
       } else if (propertyName == "type") {
-        UpdateDeviceType(propertyValue.AsInt32());
+        if (UpdateDeviceType(propertyValue.AsInt32())) {
+          needToInit = true;
+        }
       } else if (propertyName == "cameraId") {
-        UpdateDeviceId(propertyValue.AsString());
+        if (UpdateDeviceId(propertyValue.AsString())) {
+          needToInit = true;
+        }
       } else if (propertyName == "keepAwake") {
         UpdateKeepAwake(propertyValue.AsBoolean());
       } else if (propertyName == "mirrorVideo") {
@@ -105,6 +123,10 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
     }
   }
   m_isBusy.store(false);
+
+  if (needToInit) {
+    ReInitialize();
+  }
 }
 
 IAsyncAction ReactCameraView::UpdateFilePropertiesAsync(StorageFile storageFile, JSValueObject const &options) {
@@ -553,31 +575,25 @@ IAsyncAction ReactCameraView::WaitAndStopRecording() {
 }
 
 // Select a particular camera, need to clean up and reinitialize the mediaCapture object
-fire_and_forget ReactCameraView::UpdateDeviceId(std::string cameraId) {
-  if (m_cameraId == cameraId && m_isInitialized.load()) {
-    return;
+bool ReactCameraView::UpdateDeviceId(std::string cameraId) {
+  if (m_cameraId == cameraId) {
+    return false;
   }
 
   m_cameraId = cameraId;
-  if (m_isInitialized.load()) {
-    co_await CleanupMediaCaptureAsync();
-  }
-  co_await InitializeAsync();
+  return true;
 }
 
 // Switch between front and back cameras, need to clean up and reinitialize the mediaCapture object
-fire_and_forget ReactCameraView::UpdateDeviceType(int type) {
+bool ReactCameraView::UpdateDeviceType(int type) {
   winrt::Windows::Devices::Enumeration::Panel newPanelType =
       static_cast<winrt::Windows::Devices::Enumeration::Panel>(type);
-  if (m_panelType == newPanelType && m_isInitialized.load()) {
-    return;
+  if (m_panelType == newPanelType) {
+    return false;
   }
 
   m_panelType = newPanelType;
-  if (m_isInitialized.load()) {
-    co_await CleanupMediaCaptureAsync();
-  }
-  co_await InitializeAsync();
+  return true;
 }
 
 bool ReactCameraView::TryUpdateMediaCaptureSource(const winrt::Windows::Media::Capture::MediaCapture &mediaCapture) {
@@ -737,14 +753,28 @@ void ReactCameraView::UpdateBarcodeReadIntervalMS(int barcodeReadIntervalMS) {
   m_barcodeReadIntervalMS = std::max<int>(ReactCameraConstants::BarcodeReadIntervalMinMS, barcodeReadIntervalMS);
 }
 
+fire_and_forget ReactCameraView::ReInitialize() {
+  size_t counter = 0;
+  while (m_isInitializing.load() && counter < 10'000) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{16});
+    counter++;
+  }
+
+  if (m_isInitialized.load()) {
+    co_await CleanupMediaCaptureAsync();
+  }
+  co_await InitializeAsync();
+}
+
 // Initialization takes care few things below:
 // 1. Register rotation helper to update preview if rotation changes.
 // 2. Takes care connected standby scenarios to cleanup and re-initialize when suspend/resume
 IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
-  if (!m_childElement) {
+  if (!m_childElement || m_isInitializing.load()) {
     co_return;
   }
 
+  m_isInitializing.store(true);
   m_isBusy.store(true);
   try {
     auto device = co_await FindCameraDeviceAsync();
@@ -760,10 +790,12 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
       const bool keepTryingToInit = initAttempts < 25;
       if (!updateSuccessful && keepTryingToInit) {
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        m_isInitializing.store(false);
         co_await InitializeAsync(++initAttempts);
         m_isBusy.store(false);
         co_return;
       } else if (!keepTryingToInit) {
+        m_isInitializing.store(false);
         m_isBusy.store(false);
         co_return;
       }
