@@ -150,7 +150,7 @@ IAsyncAction ReactCameraView::TakePictureAsync(
   auto dispatcher = Dispatcher();
   co_await resume_foreground(dispatcher);
 
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     // Default with no options is to save the image to the temp folder and return the uri
     // This follows the expectations of RNCamera without requiring extra app capabilities
 
@@ -352,7 +352,7 @@ IAsyncAction ReactCameraView::RecordAsync(
   auto dispatcher = Dispatcher();
   co_await resume_foreground(dispatcher);
 
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     int quality;
     TryGetValueAsInt(capturedOptions, "quality", quality, m_defaultVideoQuality);
 
@@ -484,7 +484,7 @@ IAsyncAction ReactCameraView::PausePreviewAsync() noexcept {
   co_await resume_foreground(dispatcher);
 
   m_isBusy.store(true);
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     if (m_isPreview) {
       try {
         co_await mediaCapture.StopPreviewAsync();
@@ -507,7 +507,7 @@ IAsyncAction ReactCameraView::ResumePreviewAsync() noexcept {
   co_await resume_foreground(dispatcher);
 
   m_isBusy.store(true);
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     if (!m_isPreview) {
       try {
         co_await mediaCapture.StartPreviewAsync();
@@ -615,7 +615,7 @@ void ReactCameraView::UpdateKeepAwake(bool keepAwake) {
 
 void ReactCameraView::UpdateFlashMode(int flashMode) {
   m_flashMode = flashMode;
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     auto flashControl = mediaCapture.VideoDeviceController().FlashControl();
     if (flashControl.Supported()) {
       flashControl.Enabled(flashMode == ReactCameraConstants::CameraFlashModeOn);
@@ -626,7 +626,7 @@ void ReactCameraView::UpdateFlashMode(int flashMode) {
 
 void ReactCameraView::UpdateAutoFocus(int focusMode) {
   m_focusMode = focusMode;
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     auto focusControl = mediaCapture.VideoDeviceController().FocusControl();
     if (focusControl.Supported()) {
       auto asyncOp = focusControl.SetPresetAsync(static_cast<winrt::FocusPreset>(focusMode));
@@ -636,7 +636,7 @@ void ReactCameraView::UpdateAutoFocus(int focusMode) {
 
 void ReactCameraView::UpdateWhiteBalance(int whiteBalance) {
   m_whiteBalance = whiteBalance;
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
     auto whiteBalanceControl = mediaCapture.VideoDeviceController().WhiteBalanceControl();
     if (whiteBalanceControl.Supported()) {
       auto asyncOp = whiteBalanceControl.SetPresetAsync(static_cast<winrt::ColorTemperaturePreset>(whiteBalance));
@@ -645,11 +645,19 @@ void ReactCameraView::UpdateWhiteBalance(int whiteBalance) {
 }
 
 void ReactCameraView::UpdateMirrorVideo(bool mirrorVideo) {
+  if (!m_childElement) {
+    return;
+  }
+
   m_mirrorVideo = mirrorVideo;
   m_childElement.FlowDirection(mirrorVideo ? winrt::FlowDirection::RightToLeft : winrt::FlowDirection::LeftToRight);
 }
 
 void ReactCameraView::UpdateAspect(int aspect) {
+  if (!m_childElement) {
+    return;
+  }
+
   switch (aspect) {
     case ReactCameraConstants::CameraAspectFill:
       m_childElement.Stretch(Stretch::Uniform);
@@ -733,7 +741,7 @@ void ReactCameraView::UpdateBarcodeReadIntervalMS(int barcodeReadIntervalMS) {
 // 1. Register rotation helper to update preview if rotation changes.
 // 2. Takes care connected standby scenarios to cleanup and re-initialize when suspend/resume
 IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
-  if (m_childElement == nullptr) {
+  if (!m_childElement) {
     co_return;
   }
 
@@ -815,7 +823,7 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync() {
 }
 
 IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality) {
-  if (auto mediaCapture = m_childElement.Source()) {
+  if (m_childElement && m_childElement.Source()) {
     winrt::VideoEncodingProperties foundProperties = nullptr;
     uint32_t foundResolution = 0;
     uint32_t foundFrameRate = 0;
@@ -866,8 +874,10 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality)
     }
 
     if (foundProperties) {
-      co_await mediaCapture.VideoDeviceController().SetMediaStreamPropertiesAsync(
-          winrt::MediaStreamType::VideoPreview, foundProperties);
+      if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
+        co_await mediaCapture.VideoDeviceController().SetMediaStreamPropertiesAsync(
+            winrt::MediaStreamType::VideoPreview, foundProperties);
+      }
     }
   }
   co_return;
@@ -881,7 +891,7 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
   if (m_isInitialized.load()) {
     m_isBusy.store(true);
     SetEvent(m_signal.get()); // In case recording is still going on
-    if (auto mediaCapture = m_childElement.Source()) {
+    if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
       StopBarcodeScanner();
 
       if (m_isPreview) {
@@ -984,7 +994,7 @@ winrt::Windows::Foundation::IAsyncAction ReactCameraView::ScanForBarcodeAsync() 
   co_await resume_foreground(dispatcher);
 
   try {
-    if (auto mediaCapture = m_childElement.Source()) {
+    if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
       // Capture the image
       auto lowLagCapture = co_await mediaCapture.PrepareLowLagPhotoCaptureAsync(
           winrt::ImageEncodingProperties().CreateUncompressed(winrt::MediaPixelFormat::Bgra8));
@@ -1054,7 +1064,7 @@ void ReactCameraView::OnApplicationResuming() {
 // update preview considering current orientation
 IAsyncAction ReactCameraView::UpdatePreviewOrientationAsync() {
   if (m_isInitialized.load()) {
-    if (auto mediaCapture = m_childElement.Source()) {
+    if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
       const GUID RotationKey = {0xC380465D, 0x2271, 0x428C, {0x9B, 0x83, 0xEC, 0xEA, 0x3B, 0x4A, 0x85, 0xC1}};
       auto props = mediaCapture.VideoDeviceController().GetMediaStreamProperties(MediaStreamType::VideoPreview);
       props.Properties().Insert(RotationKey, winrt::box_value(m_rotationHelper.GetCameraPreviewClockwiseDegrees()));
