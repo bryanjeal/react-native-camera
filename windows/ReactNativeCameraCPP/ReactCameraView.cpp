@@ -74,15 +74,6 @@ void ReactCameraView::UpdateProperties(IJSValueReader const &propertyMapReader) 
   // let's only do one initialization
   bool needToInit{false};
   for (auto const &pair : propertyMap) {
-    auto const &propertyName = pair.first;
-    if (propertyName == "type") {
-      needToInit = true;
-    } else if (propertyName == "cameraId") {
-      needToInit = true;
-    }
-  }
-
-  for (auto const &pair : propertyMap) {
     if (m_isRecording.load()) {
       m_isBusy.store(false);
       return;
