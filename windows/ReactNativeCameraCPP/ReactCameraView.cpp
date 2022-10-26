@@ -33,8 +33,6 @@ using namespace std::chrono;
 
 namespace winrt::ReactNativeCameraCPP {
 
-std::atomic<bool> ReactCameraView::m_isInitializing{false};
-
 /*static*/ winrt::com_ptr<ReactCameraView> ReactCameraView::Create() {
   auto view = winrt::make_self<ReactCameraView>();
   view->Initialize();
@@ -746,7 +744,7 @@ void ReactCameraView::UpdateBarcodeReadIntervalMS(int barcodeReadIntervalMS) {
 
 fire_and_forget ReactCameraView::ReInitialize() {
   size_t counter = 0;
-  while (m_isInitializing.load() && counter < 10'000) {
+  while (m_isInitializing.load() && counter < 1'000) {
     std::this_thread::sleep_for(std::chrono::milliseconds{16});
     counter++;
   }
@@ -786,8 +784,8 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
         m_isBusy.store(false);
         co_return;
       } else if (!keepTryingToInit) {
-        m_isInitializing.store(false);
         m_isBusy.store(false);
+        m_isInitializing.store(false);
         co_return;
       }
 
@@ -839,6 +837,7 @@ IAsyncAction ReactCameraView::InitializeAsync(size_t initAttempts) {
     m_isInitialized.store(false);
   }
   m_isBusy.store(false);
+  m_isInitializing.store(false);
 }
 
 IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync() {
@@ -907,11 +906,7 @@ IAsyncAction ReactCameraView::UpdateMediaStreamPropertiesAsync(int videoQuality)
 }
 
 IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
-  if (m_childElement) {
-    co_return;
-  }
-
-  if (m_isInitialized.load()) {
+  if (m_childElement && m_isInitialized.load()) {
     m_isBusy.store(true);
     SetEvent(m_signal.get()); // In case recording is still going on
     if (auto mediaCapture = (m_childElement ? m_childElement.Source() : nullptr)) {
@@ -933,9 +928,11 @@ IAsyncAction ReactCameraView::CleanupMediaCaptureAsync() {
         m_childElement.Source(nullptr);
       }
     }
-    m_isInitialized.store(false);
-    m_isBusy.store(false);
   }
+
+  m_isBusy.store(false);
+  m_isInitialized.store(false);
+  m_isInitializing.store(false);
 }
 
 IAsyncOperation<winrt::DeviceInformation> ReactCameraView::FindCameraDeviceAsync() {

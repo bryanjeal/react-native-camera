@@ -118,7 +118,7 @@ InitializeAsync(size_t initAttempts = 0);
 
   winrt::Windows::Media::Capture::MediaCapture m_mediaCapture{};
 
-  static std::atomic<bool> m_isInitializing;
+  std::atomic<bool> m_isInitializing{false};
   std::atomic<bool> m_isInitialized{false};
   std::atomic<bool> m_isRecording{false};
   std::atomic<bool> m_isBusy{false};
